@@ -1,6 +1,36 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+function stripInlineComment(line) {
+  const idx = line.indexOf("#");
+  if (idx === -1) return line;
+  return line.slice(0, idx);
+}
+
+function parseTomlString(value) {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('"') && trimmed.endsWith('"'))) return null;
+  return trimmed.slice(1, -1).replace(/\\"/g, '"');
+}
+
+function parseTomlBoolean(value) {
+  const trimmed = value.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  return null;
+}
+
+function parseTomlStringArray(value) {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("[") && trimmed.endsWith("]"))) return null;
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  return inner
+    .split(",")
+    .map((part) => parseTomlString(part.trim()))
+    .filter((item) => typeof item === "string");
+}
+
 function parseFrontmatter(md) {
   const match = md.match(/^---\n([\s\S]*?)\n---\n?/);
   if (!match) return null;
@@ -18,27 +48,64 @@ function parseFrontmatter(md) {
   return { data, body };
 }
 
-function loadSelectors(projectRoot) {
-  const selectorsPath = join(projectRoot, "capabilities", "bridge-selectors", "selectors.json");
-  if (!existsSync(selectorsPath)) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(selectorsPath, "utf-8"));
-    return Array.isArray(parsed.skillBridges) ? parsed.skillBridges : [];
-  } catch {
-    return [];
-  }
-}
+function readSkillBridgeConfigs(projectRoot) {
+  const configPath = join(projectRoot, "omni.toml");
+  if (!existsSync(configPath)) return [];
 
-function readSkillBridgeConfig(projectRoot, capabilityId) {
-  const entries = loadSelectors(projectRoot);
-  const cfg = entries.find((entry) => entry?.capabilityId === capabilityId);
-  return {
-    include: Array.isArray(cfg?.include) ? cfg.include : [],
-    exclude: Array.isArray(cfg?.exclude) ? cfg.exclude : [],
-    nameMode: cfg?.nameMode === "prefixed" ? "prefixed" : "leaf"
-  };
+  const content = readFileSync(configPath, "utf-8");
+  const lines = content.split("\n");
+  let currentSection = "";
+  const byName = new Map();
+
+  for (const rawLine of lines) {
+    const line = stripInlineComment(rawLine).trim();
+    if (!line) continue;
+
+    if (line.startsWith("[") && line.endsWith("]")) {
+      currentSection = line.slice(1, -1).trim();
+      continue;
+    }
+
+    const prefix = "extensions.skill_bridges.";
+    if (!currentSection.startsWith(prefix)) continue;
+
+    const bridgeName = currentSection.slice(prefix.length);
+    if (!bridgeName) continue;
+
+    const eqIdx = line.indexOf("=");
+    if (eqIdx === -1) continue;
+
+    const key = line.slice(0, eqIdx).trim();
+    const rawValue = line.slice(eqIdx + 1).trim();
+    const current = byName.get(bridgeName) ?? {
+      bridgeName,
+      sourceCapabilityId: "",
+      include: [],
+      exclude: [],
+      nameMode: "leaf"
+    };
+
+    if (key === "source_capability_id") {
+      const v = parseTomlString(rawValue);
+      if (v) current.sourceCapabilityId = v;
+    } else if (key === "include") {
+      const v = parseTomlStringArray(rawValue);
+      if (v) current.include = v;
+    } else if (key === "exclude") {
+      const v = parseTomlStringArray(rawValue);
+      if (v) current.exclude = v;
+    } else if (key === "name_mode") {
+      const v = parseTomlString(rawValue);
+      if (v === "prefixed" || v === "leaf") current.nameMode = v;
+    } else if (key === "enabled") {
+      const v = parseTomlBoolean(rawValue);
+      if (v === false) current.disabled = true;
+    }
+
+    byName.set(bridgeName, current);
+  }
+
+  return Array.from(byName.values()).filter((cfg) => cfg.sourceCapabilityId && cfg.disabled !== true);
 }
 
 function shouldInclude(rel, include, exclude) {
@@ -75,13 +142,12 @@ function getSourceSkillsRoot(projectRoot, capabilityId) {
   return join(projectRoot, ".omni", "capabilities", capabilityId, "skills");
 }
 
-function collectNestedSkills(projectRoot, capabilityId) {
-  const selectors = readSkillBridgeConfig(projectRoot, capabilityId);
-  const skillsRoot = getSourceSkillsRoot(projectRoot, capabilityId);
+function collectNestedSkills(projectRoot, bridgeCfg, usedNames) {
+  const { sourceCapabilityId, include, exclude, nameMode } = bridgeCfg;
+  const skillsRoot = getSourceSkillsRoot(projectRoot, sourceCapabilityId);
   if (!existsSync(skillsRoot)) return [];
 
   const out = [];
-  const usedNames = new Set();
   const categories = readdirSync(skillsRoot, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
@@ -96,7 +162,7 @@ function collectNestedSkills(projectRoot, capabilityId) {
 
     for (const rawSkillName of entries) {
       const rel = `${category}/${rawSkillName}`;
-      if (!shouldInclude(rel, selectors.include, selectors.exclude)) continue;
+      if (!shouldInclude(rel, include, exclude)) continue;
 
       const skillDir = join(categoryDir, rawSkillName);
       const skillMdPath = join(skillDir, "SKILL.md");
@@ -106,7 +172,7 @@ function collectNestedSkills(projectRoot, capabilityId) {
       const parsed = parseFrontmatter(content);
       if (!parsed || !parsed.data.name || !parsed.data.description) continue;
 
-      const preferred = selectors.nameMode === "prefixed"
+      const preferred = nameMode === "prefixed"
         ? `${category}-${rawSkillName}`
         : rawSkillName;
       const baseName = slugifyName(preferred);
@@ -124,6 +190,13 @@ function collectNestedSkills(projectRoot, capabilityId) {
 export default {
   skills: (() => {
     const projectRoot = process.cwd();
-    return collectNestedSkills(projectRoot, "mattpocock-skills");
+    const bridgeConfigs = readSkillBridgeConfigs(projectRoot);
+    const usedNames = new Set();
+    const all = [];
+    for (const bridgeCfg of bridgeConfigs) {
+      const skills = collectNestedSkills(projectRoot, bridgeCfg, usedNames);
+      for (const skill of skills) all.push(skill);
+    }
+    return all;
   })()
 };

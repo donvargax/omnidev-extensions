@@ -1,6 +1,36 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+function stripInlineComment(line) {
+  const idx = line.indexOf("#");
+  if (idx === -1) return line;
+  return line.slice(0, idx);
+}
+
+function parseTomlString(value) {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('"') && trimmed.endsWith('"'))) return null;
+  return trimmed.slice(1, -1).replace(/\\"/g, '"');
+}
+
+function parseTomlBoolean(value) {
+  const trimmed = value.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  return null;
+}
+
+function parseTomlStringArray(value) {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("[") && trimmed.endsWith("]"))) return null;
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  return inner
+    .split(",")
+    .map((part) => parseTomlString(part.trim()))
+    .filter((item) => typeof item === "string");
+}
+
 function parseJsoncLoose(content) {
   const stripped = content
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -13,29 +43,49 @@ function writeJsonc(path, data) {
   writeFileSync(path, text, "utf-8");
 }
 
-function readBridgeSelectors(projectRoot) {
-  const selectorsPath = join(projectRoot, "capabilities", "bridge-selectors", "selectors.json");
+function readExtensionConfig(projectRoot) {
+  const configPath = join(projectRoot, "omni.toml");
   const fallback = {
     plugins: [],
     syncMcpFromDotMcpJson: true,
-    mcpTargetKey: "mcp",
-    mcp: {}
+    mcpTargetKey: "mcp"
   };
-  if (!existsSync(selectorsPath)) return fallback;
-  try {
-    const parsed = JSON.parse(readFileSync(selectorsPath, "utf-8"));
-    const cfg = parsed?.opencode || {};
-    return {
-      plugins: Array.isArray(cfg.plugins) ? cfg.plugins : [],
-      syncMcpFromDotMcpJson: cfg.syncMcpFromDotMcpJson !== false,
-      mcpTargetKey: typeof cfg.mcpTargetKey === "string" && cfg.mcpTargetKey.length > 0
-        ? cfg.mcpTargetKey
-        : "mcp",
-      mcp: cfg.mcp && typeof cfg.mcp === "object" ? cfg.mcp : {}
-    };
-  } catch {
-    return fallback;
+  if (!existsSync(configPath)) return fallback;
+
+  const content = readFileSync(configPath, "utf-8");
+  const lines = content.split("\n");
+  let inSection = false;
+  const out = { ...fallback };
+
+  for (const rawLine of lines) {
+    const line = stripInlineComment(rawLine).trim();
+    if (!line) continue;
+
+    if (line.startsWith("[") && line.endsWith("]")) {
+      const section = line.slice(1, -1).trim();
+      inSection = section === "extensions.opencode";
+      continue;
+    }
+
+    if (!inSection) continue;
+    const eqIdx = line.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = line.slice(0, eqIdx).trim();
+    const rawValue = line.slice(eqIdx + 1).trim();
+
+    if (key === "plugins") {
+      const arr = parseTomlStringArray(rawValue);
+      if (arr) out.plugins = arr;
+    } else if (key === "sync_mcp_from_dot_mcp_json") {
+      const b = parseTomlBoolean(rawValue);
+      if (b !== null) out.syncMcpFromDotMcpJson = b;
+    } else if (key === "mcp_target_key") {
+      const s = parseTomlString(rawValue);
+      if (s && s.length > 0) out.mcpTargetKey = s;
+    }
   }
+
+  return out;
 }
 
 function readDotMcpJson(projectRoot) {
@@ -70,7 +120,7 @@ async function sync() {
   const projectRoot = process.cwd();
   const opencodeDir = join(projectRoot, ".opencode");
   const opencodeConfigPath = join(opencodeDir, "opencode.jsonc");
-  const selectors = readBridgeSelectors(projectRoot);
+  const ext = readExtensionConfig(projectRoot);
 
   mkdirSync(opencodeDir, { recursive: true });
 
@@ -83,20 +133,13 @@ async function sync() {
     }
   }
 
-  config.plugin = selectors.plugins;
+  config.plugin = ext.plugins;
 
-  if (selectors.mcp && Object.keys(selectors.mcp).length > 0) {
-    config[selectors.mcpTargetKey] = selectors.mcp;
-    if (selectors.mcpTargetKey !== "mcpServers" && Object.prototype.hasOwnProperty.call(config, "mcpServers")) {
-      delete config.mcpServers;
-    }
-  }
-
-  if (selectors.syncMcpFromDotMcpJson) {
+  if (ext.syncMcpFromDotMcpJson) {
     const mcpServers = readDotMcpJson(projectRoot);
-    if (mcpServers && (!selectors.mcp || Object.keys(selectors.mcp).length === 0)) {
-      config[selectors.mcpTargetKey] = toOpencodeMcp(mcpServers);
-      if (selectors.mcpTargetKey !== "mcpServers" && Object.prototype.hasOwnProperty.call(config, "mcpServers")) {
+    if (mcpServers) {
+      config[ext.mcpTargetKey] = toOpencodeMcp(mcpServers);
+      if (ext.mcpTargetKey !== "mcpServers" && Object.prototype.hasOwnProperty.call(config, "mcpServers")) {
         delete config.mcpServers;
       }
     }
