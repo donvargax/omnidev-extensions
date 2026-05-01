@@ -1,0 +1,5 @@
+[capability]
+id = "ext-nested-skills"
+name = "Extension Nested Skills"
+version = "0.1.0"
+description = "Flattens nested category skills into OmniDev-compatible skills"

@@ -1,0 +1,5 @@
+[capability]
+id = "ext-opencode-config"
+name = "Extension OpenCode Config"
+version = "0.1.0"
+description = "Syncs OpenCode config fields from OmniDev extension settings"
