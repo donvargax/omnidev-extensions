@@ -48,7 +48,7 @@ function parseFrontmatter(md) {
   return { data, body };
 }
 
-function readSkillBridgeConfigs(projectRoot) {
+export function readSkillBridgeConfigs(projectRoot) {
   const configPath = join(projectRoot, "omni.toml");
   if (!existsSync(configPath)) return [];
 
@@ -187,16 +187,17 @@ function collectNestedSkills(projectRoot, bridgeCfg, usedNames) {
   return out;
 }
 
+export function buildSkills(projectRoot = process.cwd()) {
+  const bridgeConfigs = readSkillBridgeConfigs(projectRoot);
+  const usedNames = new Set();
+  const all = [];
+  for (const bridgeCfg of bridgeConfigs) {
+    const skills = collectNestedSkills(projectRoot, bridgeCfg, usedNames);
+    for (const skill of skills) all.push(skill);
+  }
+  return all;
+}
+
 export default {
-  skills: (() => {
-    const projectRoot = process.cwd();
-    const bridgeConfigs = readSkillBridgeConfigs(projectRoot);
-    const usedNames = new Set();
-    const all = [];
-    for (const bridgeCfg of bridgeConfigs) {
-      const skills = collectNestedSkills(projectRoot, bridgeCfg, usedNames);
-      for (const skill of skills) all.push(skill);
-    }
-    return all;
-  })()
+  skills: buildSkills()
 };

@@ -43,7 +43,7 @@ function writeJsonc(path, data) {
   writeFileSync(path, text, "utf-8");
 }
 
-function readExtensionConfig(projectRoot) {
+export function readExtensionConfig(projectRoot) {
   const configPath = join(projectRoot, "omni.toml");
   const fallback = {
     plugins: [],
@@ -101,7 +101,7 @@ function readDotMcpJson(projectRoot) {
   }
 }
 
-function toOpencodeMcp(rawMcpServers) {
+export function toOpencodeMcp(rawMcpServers) {
   const out = {};
   for (const [name, cfg] of Object.entries(rawMcpServers)) {
     if (!cfg || typeof cfg !== "object") continue;
@@ -116,7 +116,7 @@ function toOpencodeMcp(rawMcpServers) {
   return out;
 }
 
-async function sync() {
+export async function sync() {
   const projectRoot = process.cwd();
   const opencodeDir = join(projectRoot, ".opencode");
   const opencodeConfigPath = join(opencodeDir, "opencode.jsonc");
