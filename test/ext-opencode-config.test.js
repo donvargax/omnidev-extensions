@@ -16,6 +16,34 @@ test("toOpencodeMcp maps url-based servers to remote disabled entries", () => {
       type: "remote",
       url: "https://example.com/mcp",
       enabled: false
+    },
+    bad: {
+      type: "local",
+      command: ["node server.js"],
+      enabled: false
+    }
+  });
+});
+
+test("toOpencodeMcp maps stdio command+args and env to local", () => {
+  const mapped = toOpencodeMcp({
+    serena: {
+      command: "serena",
+      args: ["start-mcp-server", "--context=ide"],
+      env: {
+        SERENA_LOG: "warn",
+        IGNORE_ME: 123
+      }
+    }
+  });
+  assert.deepEqual(mapped, {
+    serena: {
+      type: "local",
+      command: ["serena", "start-mcp-server", "--context=ide"],
+      environment: {
+        SERENA_LOG: "warn"
+      },
+      enabled: false
     }
   });
 });
@@ -33,7 +61,7 @@ test("sync writes plugin and mcp from .mcp.json", async () => {
     JSON.stringify({
       mcpServers: {
         context7: { url: "https://context7.example/mcp" },
-        localOnly: { command: "node server.js" }
+        localOnly: { command: "node server.js", args: ["--stdio"] }
       }
     }),
     "utf-8"
@@ -53,6 +81,11 @@ test("sync writes plugin and mcp from .mcp.json", async () => {
     context7: {
       type: "remote",
       url: "https://context7.example/mcp",
+      enabled: false
+    },
+    localOnly: {
+      type: "local",
+      command: ["node server.js", "--stdio"],
       enabled: false
     }
   });

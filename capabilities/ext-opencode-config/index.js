@@ -106,12 +106,42 @@ export function toOpencodeMcp(rawMcpServers) {
   for (const [name, cfg] of Object.entries(rawMcpServers)) {
     if (!cfg || typeof cfg !== "object") continue;
     const url = typeof cfg.url === "string" ? cfg.url : undefined;
-    if (!url) continue;
-    out[name] = {
-      type: "remote",
-      url,
-      enabled: false
-    };
+    if (url) {
+      out[name] = {
+        type: "remote",
+        url,
+        enabled: false
+      };
+      continue;
+    }
+
+    const rawCommand = cfg.command;
+    const args = Array.isArray(cfg.args)
+      ? cfg.args.filter((v) => typeof v === "string")
+      : [];
+    const command = Array.isArray(rawCommand)
+      ? rawCommand.filter((v) => typeof v === "string")
+      : typeof rawCommand === "string"
+        ? [rawCommand, ...args]
+        : [];
+
+    if (command.length > 0) {
+      const local = {
+        type: "local",
+        command,
+        enabled: false
+      };
+      if (cfg.env && typeof cfg.env === "object" && !Array.isArray(cfg.env)) {
+        const environment = {};
+        for (const [k, v] of Object.entries(cfg.env)) {
+          if (typeof v === "string") environment[k] = v;
+        }
+        if (Object.keys(environment).length > 0) {
+          local.environment = environment;
+        }
+      }
+      out[name] = local;
+    }
   }
   return out;
 }
