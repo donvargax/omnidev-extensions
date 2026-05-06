@@ -76,6 +76,7 @@ test("sync writes plugin and mcp from .mcp.json", async () => {
   }
 
   const out = JSON.parse(readFileSync(join(root, ".opencode", "opencode.jsonc"), "utf-8"));
+  assert.equal(out.$schema, "https://opencode.ai/config.json");
   assert.deepEqual(out.plugin, ["source.omni"]);
   assert.deepEqual(out.mcp, {
     context7: {
@@ -89,6 +90,93 @@ test("sync writes plugin and mcp from .mcp.json", async () => {
       enabled: false
     }
   });
+});
+
+test("sync preserves existing provider config while updating plugin/mcp", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omnidev-ext-opencode-"));
+  mkdirSync(join(root, ".opencode"), { recursive: true });
+  writeFileSync(
+    join(root, "omni.toml"),
+    `[extensions.opencode]\nplugins = ["source.omni"]\nsync_mcp_from_dot_mcp_json = true\nmcp_target_key = "mcp"\n`,
+    "utf-8"
+  );
+  writeFileSync(
+    join(root, ".mcp.json"),
+    JSON.stringify({ mcpServers: { deepwiki: { url: "https://mcp.deepwiki.com/mcp" } } }),
+    "utf-8"
+  );
+  writeFileSync(
+    join(root, ".opencode", "opencode.jsonc"),
+    JSON.stringify({
+      provider: {
+        ollama: {
+          name: "Ollama (local)",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "http://localhost:11434/v1" }
+        }
+      }
+    }),
+    "utf-8"
+  );
+
+  const oldCwd = process.cwd();
+  process.chdir(root);
+  try {
+    await sync();
+  } finally {
+    process.chdir(oldCwd);
+  }
+
+  const out = JSON.parse(readFileSync(join(root, ".opencode", "opencode.jsonc"), "utf-8"));
+  assert.equal(out.$schema, "https://opencode.ai/config.json");
+  assert.equal(out.provider.ollama.options.baseURL, "http://localhost:11434/v1");
+  assert.deepEqual(out.plugin, ["source.omni"]);
+  assert.equal(out.mcp.deepwiki.type, "remote");
+});
+
+test("sync preserves provider from jsonc with comments and trailing commas", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omnidev-ext-opencode-"));
+  mkdirSync(join(root, ".opencode"), { recursive: true });
+  writeFileSync(
+    join(root, "omni.toml"),
+    `[extensions.opencode]\nplugins = []\nsync_mcp_from_dot_mcp_json = true\nmcp_target_key = "mcp"\n`,
+    "utf-8"
+  );
+  writeFileSync(
+    join(root, ".mcp.json"),
+    JSON.stringify({ mcpServers: { context7: { url: "https://mcp.context7.com/mcp" } } }),
+    "utf-8"
+  );
+  writeFileSync(
+    join(root, ".opencode", "opencode.jsonc"),
+    `{
+  "$schema": "https://opencode.ai/config.json",
+  // keep existing provider config
+  "provider": {
+    "ollama": {
+      "name": "Ollama (local)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+      },
+    },
+  },
+}
+`,
+    "utf-8"
+  );
+
+  const oldCwd = process.cwd();
+  process.chdir(root);
+  try {
+    await sync();
+  } finally {
+    process.chdir(oldCwd);
+  }
+
+  const out = JSON.parse(readFileSync(join(root, ".opencode", "opencode.jsonc"), "utf-8"));
+  assert.equal(out.provider.ollama.options.baseURL, "http://localhost:11434/v1");
+  assert.equal(out.mcp.context7.type, "remote");
 });
 
 test("sync removes legacy mcpServers when target key is mcp", async () => {

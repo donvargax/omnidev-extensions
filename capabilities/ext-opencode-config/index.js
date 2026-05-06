@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json";
+
 function stripInlineComment(line) {
   const idx = line.indexOf("#");
   if (idx === -1) return line;
@@ -34,7 +36,8 @@ function parseTomlStringArray(value) {
 function parseJsoncLoose(content) {
   const stripped = content
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
+    .replace(/^\s*\/\/.*$/gm, "")
+    .replace(/,\s*([}\]])/g, "$1");
   return JSON.parse(stripped);
 }
 
@@ -161,6 +164,10 @@ export async function sync() {
     } catch {
       config = {};
     }
+  }
+
+  if (typeof config.$schema !== "string" || config.$schema.length === 0) {
+    config.$schema = OPENCODE_SCHEMA_URL;
   }
 
   config.plugin = ext.plugins;
