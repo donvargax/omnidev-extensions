@@ -6,21 +6,27 @@ import { tmpdir } from "node:os";
 
 import { sync, toOpencodeMcp } from "../capabilities/ext-opencode-config/index.js";
 
-test("toOpencodeMcp maps url-based servers to remote disabled entries", () => {
+test("toOpencodeMcp maps url-based servers and derives enabled from disabled", () => {
   const mapped = toOpencodeMcp({
     good: { url: "https://example.com/mcp" },
+    disabledByFlag: { url: "https://disabled.example/mcp", disabled: true },
     bad: { command: "node server.js" }
   });
   assert.deepEqual(mapped, {
     good: {
       type: "remote",
       url: "https://example.com/mcp",
+      enabled: true
+    },
+    disabledByFlag: {
+      type: "remote",
+      url: "https://disabled.example/mcp",
       enabled: false
     },
     bad: {
       type: "local",
       command: ["node server.js"],
-      enabled: false
+      enabled: true
     }
   });
 });
@@ -43,7 +49,7 @@ test("toOpencodeMcp maps stdio command+args and env to local", () => {
       environment: {
         SERENA_LOG: "warn"
       },
-      enabled: false
+      enabled: true
     }
   });
 });
@@ -82,12 +88,12 @@ test("sync writes plugin and mcp from .mcp.json", async () => {
     context7: {
       type: "remote",
       url: "https://context7.example/mcp",
-      enabled: false
+      enabled: true
     },
     localOnly: {
       type: "local",
       command: ["node server.js", "--stdio"],
-      enabled: false
+      enabled: true
     }
   });
 });

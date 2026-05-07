@@ -108,12 +108,13 @@ export function toOpencodeMcp(rawMcpServers) {
   const out = {};
   for (const [name, cfg] of Object.entries(rawMcpServers)) {
     if (!cfg || typeof cfg !== "object") continue;
+    const enabled = cfg.disabled !== true;
     const url = typeof cfg.url === "string" ? cfg.url : undefined;
     if (url) {
       out[name] = {
         type: "remote",
         url,
-        enabled: false
+        enabled
       };
       continue;
     }
@@ -132,7 +133,7 @@ export function toOpencodeMcp(rawMcpServers) {
       const local = {
         type: "local",
         command,
-        enabled: false
+        enabled
       };
       if (cfg.env && typeof cfg.env === "object" && !Array.isArray(cfg.env)) {
         const environment = {};
